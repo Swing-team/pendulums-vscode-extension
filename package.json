@@ -10,14 +10,75 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onCommand:extension.helloWorld"
+		"*",
+		"onView:pendulums"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "pendulums",
+					"title": "Pendulums",
+					"icon": "resources/pendulums.svg"
+				}
+			]
+		},
+		"views": {
+			"pendulums": [
+				{
+					"id": "pendulums-pendulums",
+					"name": "Pendulums"
+				}
+			]
+		},
+		"menus": {
+			"view/title": [
+				{
+					"alt": "pendulums.sync",
+					"group": "navigation",
+					"command": "pendulums.sync"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "pendulums.play",
+					"when": "viewItem == 'false' ",
+					"group": "inline"
+				},
+				{
+					"command": "pendulums.pause",
+					"when": "viewItem == 'true' ",
+					"group": "inline"
+				}
+			]
+		},
 		"commands": [
 			{
-				"command": "extension.helloWorld",
-				"title": "Hello World"
+				"command": "pendulums.signIn",
+				"title": "Sign In"
+			},
+			{
+				"command": "pendulums.signOut",
+				"title": "Sign Out"
+			},
+			{
+				"command": "pendulums.sync",
+				"title": "Sync"
+			},
+			{
+				"command": "pendulums.getProjects",
+				"title": "Get Projects"
+			},
+			{
+				"command": "pendulums.play",
+				"icon": "$(play)",
+				"title": "Play"
+			},
+			{
+				"command": "pendulums.pause",
+				"icon": "$(debug-stop)",
+				"title": "Pause"
 			}
 		]
 	},
@@ -38,5 +99,8 @@
 		"typescript": "^3.6.4",
 		"tslint": "^5.20.0",
 		"vscode-test": "^1.2.2"
+	},
+	"dependencies": {
+		"axios": "^0.19.0"
 	}
 }

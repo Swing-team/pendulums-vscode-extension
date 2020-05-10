@@ -1,27 +1,164 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { StateService } from './stateService';
+import { NotificationService } from './notificationService';
+import { ProjectDataTreeProvider } from './views/project/projectsTreeDataProvider';
+import axios from 'axios';
+import { Project } from './models/project.model';
+import { SignInDataTreeProvider } from './views/signIn/signInTreeDataProvider';
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+let state: StateService;
+let notificationService: NotificationService;
+let projectDataTreeProvider: ProjectDataTreeProvider;
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "pendulums-vscode-extension" is now active!');
+function init(context: vscode.ExtensionContext) {
+	state = new StateService(context);
+	notificationService = new NotificationService();
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('extension.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
+	let projects: Project[];
+	projects = <Project[]>state.get('projects');
+	if (projects) {
+		console.log('test', projects);
+		projectDataTreeProvider = new ProjectDataTreeProvider(projects);
+		vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
+  }
+  
+  summary();
+}
 
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World!');
+function summary() {
+	const sessionIdCookie = state.get('sails.sid');
+	axios.get('https://app.pendulums.io/api/user/summary',
+		{
+			headers: {
+				cookie: 'sails.sid=' + sessionIdCookie
+			}
+		})
+		.then(response => {
+			console.log('response', response);
+			let projects: Project[] = response.data.user.projects;
+			console.log('projects', projects);
+			state.set('projects', projects);
+			projectDataTreeProvider = new ProjectDataTreeProvider(projects);
+			vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
+		})
+		.catch(error => {
+			console.log('error', error);
+			notificationService.showError('Error on getting summary' + error);
+		});
+
+	// var options = {
+	// 	hostname: 'app.pendulums.io',
+	// 	path: '/api/user/summary',
+	// 	method: 'GET',
+	// 	headers: {
+	// 		 'Content-Type': 'application/json',
+	// 	   }
+	//   };
+
+	//   var req = https.request(options, (res) => {
+	// 	console.log('statusCode:', res.statusCode);
+	// 	console.log('headers:', res.headers);
+
+	// 	res.on('data', (d) => {
+	// 	  console.log('data', d);
+	// 	});
+	//   });
+
+	//   req.on('error', (e) => {
+	// 	console.error(e);
+	//   });
+
+	//   req.end();
+}
+
+function signOut() {
+	const sessionIdCookie = state.get('sails.sid');
+	axios.get('https://app.pendulums.io/api/auth/signOut',
+		{
+			headers: {
+				cookie: 'sails.sid=' + sessionIdCookie
+			}
+		})
+		.then(response => {
+			console.log('response', response);
+			state.set('sails.sid', undefined);
+			notificationService.showInformation('Signed out successfully');
+
+			vscode.window.registerTreeDataProvider('pendulums-pendulums', new SignInDataTreeProvider());
+		})
+		.catch(error => {
+			console.log('error', error);
+			notificationService.showError(`Sign out failed ${error}`);
+		});
+}
+
+async function signIn() {
+	const email = await vscode.window.showInputBox({
+		placeHolder: 'Email',
+		prompt: 'test'
+	});
+	if (!email) {
+		notificationService.showError('Email can\'t be empty');
+		return;
+	}
+	const password = await vscode.window.showInputBox({
+		placeHolder: 'Password',
+		password: true
+	});
+	if (!password) {
+		notificationService.showError('Password can\'t be empty');
+		return;
+	}
+	axios.post('https://app.pendulums.io/api/auth/signin', {
+		email: email,
+		password: password
+	})
+		.then(response => {
+			notificationService.showInformation('Signed in successfully');
+			let sailsSessionId = response.headers['set-cookie'][0].split('sails.sid=')[1];
+			state.set('sails.sid', sailsSessionId);
+			summary();
+		})
+		.catch(error => {
+			console.log('error', error);
+			notificationService.showError(`Sign in failed ${error}`);
+		});
+}
+
+function initCommands(context: vscode.ExtensionContext) {
+	let syncCommand = vscode.commands.registerCommand('pendulums.sync', () => {
+		summary();
 	});
 
-	context.subscriptions.push(disposable);
+	let signInCommand = vscode.commands.registerCommand('pendulums.signIn', () => {
+		signIn();
+	});
+
+	let signOutCommand = vscode.commands.registerCommand('pendulums.signOut', () => {
+		signOut();
+	});
+
+	let getProjectsCommand = vscode.commands.registerCommand('pendulums.getProjects', () => {
+		summary();
+	});
+
+	vscode.commands.registerCommand('pendulums.play', (args) => {
+		console.log('play args', args);
+		projectDataTreeProvider.changePlayingProp(args.project.id, true);
+
+
+	});
+
+	vscode.commands.registerCommand('pendulums.pause', (args) => {
+		console.log('pause args', args);
+		projectDataTreeProvider.changePlayingProp(args.project.id, false);
+	});
+}
+
+export async function activate(context: vscode.ExtensionContext) {
+	init(context);
+	initCommands(context);
 }
 
 // this method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() { }
