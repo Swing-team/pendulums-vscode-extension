@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as io from 'socket.io-client';
 import axios from 'axios';
 import { StateService } from './services/stateService';
 import { NotificationService } from './services/notificationService';
@@ -8,10 +9,37 @@ import { User } from './models/user.model';
 import { SignInDataTreeProvider } from './views/signIn/signInTreeDataProvider';
 import { DATABASE_COLUMNS } from './constants/strings';
 
+let socket: any = null;
 let state: StateService;
 let notificationService: NotificationService;
 let projectDataTreeProvider: ProjectDataTreeProvider;
 let signInTreeProvider: SignInDataTreeProvider;
+
+function initSocket() {
+  socket = io('https://app.pendulums.io', { path: '/api/socket.io', transports: ['websocket'], upgrade: true });
+  socket.on('connect', () => {
+    console.log('websocket connected!');
+    socket.emit('get', {
+      method: 'get',
+      url: '/socket/subscribe-to-events',
+    }, () => {
+      // listen to events
+    });
+  });
+
+  socket.on('message', (data: any) => {
+    if (data.type === 'projectRemoved') {
+      //TODO: There might be a current activity running on this project
+    }
+
+    if (data.type === 'syncNeeded') {
+    }
+  });
+
+  socket.on('disconnect', (error: any) => {
+    console.log('websocket disconnected!', error);
+  });
+}
 
 function init(context: vscode.ExtensionContext) {
   state = new StateService(context);
@@ -62,12 +90,12 @@ function summary() {
       let user: User = response.data.user;
       state.set(DATABASE_COLUMNS.activeUserId, user.id);
       state.set(user.id, user);
-      projectDataTreeProvider = new ProjectDataTreeProvider(user.projects);
+      projectDataTreeProvider = new ProjectDataTreeProvider(user.projects, user.currentActivity);
       vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
     })
     .catch(error => {
       console.log('error', error);
-      notificationService.showError('Error on getting summary' + error);
+      notificationService.showError(`Summary failed ${error}`);
     });
 }
 
@@ -137,20 +165,29 @@ function initCommands(context: vscode.ExtensionContext) {
     summary();
   });
 
-  vscode.commands.registerCommand('pendulums.play', (args) => {
+  vscode.commands.registerCommand('pendulums.play', async (args) => {
     console.log('play args', args);
-    projectDataTreeProvider.changePlayingProp(args.project.id, true);
-
-
+    let activeUserId = state.get(DATABASE_COLUMNS.activeUserId);
+    let userData = <User>state.get(String(activeUserId));
+    if (userData.currentActivity && userData.currentActivity.id) {
+      notificationService.showError('Please stop the running activity first');
+    } else {
+      const activityName = await vscode.window.showInputBox({
+        placeHolder: 'Untitled Activity',
+        prompt: 'Enter activity title'
+      });
+      projectDataTreeProvider.changePlayingProp(args.project.id, true);
+    }
   });
 
-  vscode.commands.registerCommand('pendulums.pause', (args) => {
-    console.log('pause args', args);
+  vscode.commands.registerCommand('pendulums.stop', (args) => {
+    console.log('stop args', args);
     projectDataTreeProvider.changePlayingProp(args.project.id, false);
   });
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+  initSocket();
   init(context);
   initCommands(context);
 }

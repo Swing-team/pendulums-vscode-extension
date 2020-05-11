@@ -1,15 +1,18 @@
 import * as vscode from 'vscode';
 import { ProjectTreeItem } from './projectTreeItem';
 import { Project } from '../../models/project.model';
+import { Activity } from '../../models/activity.model';
 
 export class ProjectDataTreeProvider implements vscode.TreeDataProvider<ProjectTreeItem | vscode.TreeItem> {
   private projects: Project[];
+  private currentActivity?: Activity;
   private onDidChange: vscode.EventEmitter<ProjectTreeItem>;
   private projectItemTree: ProjectTreeItem[] = [];
   private emptyItemTree: vscode.TreeItem[] = [];
   onDidChangeTreeData?: vscode.Event<ProjectTreeItem | null | undefined> | undefined;
-  constructor(projects?: Project[]) {
+  constructor(projects?: Project[], currentActivity?: Activity) {
     this.projects = projects ? projects : <Project[]>[];
+    this.currentActivity = currentActivity;
     this.onDidChange = new vscode.EventEmitter<ProjectTreeItem>();
     this.onDidChangeTreeData = this.onDidChange.event;
   }
@@ -37,7 +40,11 @@ export class ProjectDataTreeProvider implements vscode.TreeDataProvider<ProjectT
       } else {
         this.projects.forEach(project => {
           itemTree = new ProjectTreeItem(project);
-          itemTree.setContextValue('false');
+          if (this.currentActivity && this.currentActivity.project === project.id) {
+            itemTree.setContextValue('true');
+          } else {
+            itemTree.setContextValue('false');
+          }
           this.projectItemTree.push(itemTree);
         });
         return Promise.resolve(this.projectItemTree);
