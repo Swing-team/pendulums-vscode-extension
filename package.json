@@ -38,6 +38,11 @@
           "alt": "pendulums.sync",
           "group": "navigation",
           "command": "pendulums.sync"
+        },
+        {
+          "alt": "pendulums.signOut",
+          "group": "navigation",
+          "command": "pendulums.signOut"
         }
       ],
       "view/item/context": [
@@ -60,11 +65,13 @@
       },
       {
         "command": "pendulums.signOut",
-        "title": "Sign Out"
+        "title": "Sign Out",
+        "icon": "$(sign-out)"
       },
       {
         "command": "pendulums.sync",
-        "title": "Sync"
+        "title": "Sync",
+        "icon": "$(sync)"
       },
       {
         "command": "pendulums.getProjects",

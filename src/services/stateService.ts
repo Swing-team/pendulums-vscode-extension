@@ -13,7 +13,7 @@ export class StateService {
     return this.globalState.get(key);
   }
 
-  set(key: string, value: object | undefined): Thenable<void> {
+  set(key: string, value: object | string | undefined): Thenable<void> {
     if (!this.globalState) {
       throw new Error('The globalState not initialized');
     }

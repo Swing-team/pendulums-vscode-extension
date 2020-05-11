@@ -1,87 +1,81 @@
 import * as vscode from 'vscode';
+import axios from 'axios';
 import { StateService } from './services/stateService';
 import { NotificationService } from './services/notificationService';
 import { ProjectDataTreeProvider } from './views/project/projectsTreeDataProvider';
-import axios from 'axios';
 import { Project } from './models/project.model';
+import { User } from './models/user.model';
 import { SignInDataTreeProvider } from './views/signIn/signInTreeDataProvider';
+import { DATABASE_COLUMNS } from './constants/strings';
 
 let state: StateService;
 let notificationService: NotificationService;
 let projectDataTreeProvider: ProjectDataTreeProvider;
+let signInTreeProvider: SignInDataTreeProvider;
 
 function init(context: vscode.ExtensionContext) {
   state = new StateService(context);
   notificationService = new NotificationService();
 
-  let projects: Project[];
-  projects = <Project[]>state.get('projects');
-  if (projects) {
-    console.log('test', projects);
+  // Add a request interceptor
+  axios.interceptors.request.use(function (config) {
+    config.headers.cookie = 'sails.sid=' + state.get(DATABASE_COLUMNS.sailsSessionId);
+    return config;
+  }, function (error) {
+    // Do something with request error
+    return Promise.reject(error);
+  });
+
+  // Add a response interceptor
+  axios.interceptors.response.use(function (response) {
+    // Any status code that lie within the range of 2xx cause this function to trigger
+    return response;
+  }, function (error) {
+    // Any status codes that falls outside the range of 2xx cause this function to trigger
+    if (error.response && error.response.status === 403) {
+      state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
+      state.set(DATABASE_COLUMNS.activeUserId, undefined);
+    }
+    return Promise.reject(error);
+  });
+
+  let activeUserId = state.get(DATABASE_COLUMNS.activeUserId);
+  let sId = state.get(DATABASE_COLUMNS.sailsSessionId);
+  if (sId && activeUserId) {
+    let projects: Project[];
+    projects = <Project[]>(<User>state.get(String(activeUserId))).projects;
     projectDataTreeProvider = new ProjectDataTreeProvider(projects);
     vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
-  }
 
-  summary();
+    summary();
+  } else {
+    state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
+    signInTreeProvider = new SignInDataTreeProvider();
+    vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
+  }
 }
 
 function summary() {
-  const sessionIdCookie = state.get('sails.sid');
-  axios.get('https://app.pendulums.io/api/user/summary',
-    {
-      headers: {
-        cookie: 'sails.sid=' + sessionIdCookie
-      }
-    })
+  //TODO: Sync first
+  axios.get('https://app.pendulums.io/api/user/summary')
     .then(response => {
-      console.log('response', response);
-      let projects: Project[] = response.data.user.projects;
-      console.log('projects', projects);
-      state.set('projects', projects);
-      projectDataTreeProvider = new ProjectDataTreeProvider(projects);
+      let user: User = response.data.user;
+      state.set(DATABASE_COLUMNS.activeUserId, user.id);
+      state.set(user.id, user);
+      projectDataTreeProvider = new ProjectDataTreeProvider(user.projects);
       vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
     })
     .catch(error => {
       console.log('error', error);
       notificationService.showError('Error on getting summary' + error);
     });
-
-  // var options = {
-  // 	hostname: 'app.pendulums.io',
-  // 	path: '/api/user/summary',
-  // 	method: 'GET',
-  // 	headers: {
-  // 		 'Content-Type': 'application/json',
-  // 	   }
-  //   };
-
-  //   var req = https.request(options, (res) => {
-  // 	console.log('statusCode:', res.statusCode);
-  // 	console.log('headers:', res.headers);
-
-  // 	res.on('data', (d) => {
-  // 	  console.log('data', d);
-  // 	});
-  //   });
-
-  //   req.on('error', (e) => {
-  // 	console.error(e);
-  //   });
-
-  //   req.end();
 }
 
 function signOut() {
-  const sessionIdCookie = state.get('sails.sid');
-  axios.get('https://app.pendulums.io/api/auth/signOut',
-    {
-      headers: {
-        cookie: 'sails.sid=' + sessionIdCookie
-      }
-    })
+  axios.get('https://app.pendulums.io/api/auth/signOut')
     .then(response => {
-      console.log('response', response);
-      state.set('sails.sid', undefined);
+      state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
+      state.set(DATABASE_COLUMNS.activeUserId, undefined);
       notificationService.showInformation('Signed out successfully');
 
       vscode.window.registerTreeDataProvider('pendulums-pendulums', new SignInDataTreeProvider());
@@ -95,7 +89,7 @@ function signOut() {
 async function signIn() {
   const email = await vscode.window.showInputBox({
     placeHolder: 'Email',
-    prompt: 'test'
+    prompt: 'Email'
   });
   if (!email) {
     notificationService.showError('Email can\'t be empty');
@@ -103,6 +97,7 @@ async function signIn() {
   }
   const password = await vscode.window.showInputBox({
     placeHolder: 'Password',
+    prompt: 'Password',
     password: true
   });
   if (!password) {
@@ -116,7 +111,7 @@ async function signIn() {
     .then(response => {
       notificationService.showInformation('Signed in successfully');
       let sailsSessionId = response.headers['set-cookie'][0].split('sails.sid=')[1];
-      state.set('sails.sid', sailsSessionId);
+      state.set(DATABASE_COLUMNS.sailsSessionId, sailsSessionId);
       summary();
     })
     .catch(error => {

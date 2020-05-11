@@ -13,7 +13,7 @@ export class SignInDataTreeProvider implements vscode.TreeDataProvider<vscode.Tr
         title: 'Sign in',
         command: 'pendulums.signIn'
       };
-      signIn.contextValue = '111';
+      signIn.contextValue = 'SignIn';
       let items = [];
       items.push(signIn);
       return Promise.resolve(items);
