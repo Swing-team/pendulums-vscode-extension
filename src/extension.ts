@@ -9,6 +9,9 @@ import { User } from './models/user.model';
 import { SignInDataTreeProvider } from './views/signIn/signInTreeDataProvider';
 import { DATABASE_COLUMNS } from './constants/strings';
 
+const apiEndPoint = 'http://localhost:1337';
+const socketEndPoint = 'http://localhost:1337';
+
 let socket: any = null;
 let state: StateService;
 let notificationService: NotificationService;
@@ -16,24 +19,39 @@ let projectDataTreeProvider: ProjectDataTreeProvider;
 let signInTreeProvider: SignInDataTreeProvider;
 
 function initSocket() {
-  socket = io('https://app.pendulums.io', { path: '/api/socket.io', transports: ['websocket'], upgrade: true });
+  socket = io(socketEndPoint, { path: '/socket.io', transports: ['websocket'], upgrade: true });
   socket.on('connect', () => {
+    const sId = state.get(DATABASE_COLUMNS.sailsSessionId);
     console.log('websocket connected!');
-    socket.emit('get', {
-      method: 'get',
-      url: '/socket/subscribe-to-events',
-    }, () => {
-      // listen to events
-    });
+    if (sId) {
+      socket.emit('get', {
+        method: 'get',
+        url: '/socket/subscribe-to-events',
+        headers: {
+          cookie: 'sails.sid=' + sId
+        }
+      }, () => {
+        // listen to events
+      });
+    }
   });
 
   socket.on('message', (data: any) => {
-    if (data.type === 'projectRemoved') {
-      //TODO: There might be a current activity running on this project
-    }
+    console.log('hello');
+    // if (data.type === 'projectRemoved') {
+    //   //TODO: There might be a current activity running on this project
+    //   console.log('delete project', data.data);
+    //   console.log('delete project', data.data.toStrin());
+    //   // let activeUserId = state.get(DATABASE_COLUMNS.activeUserId);
+    //   // let userData = <User>state.get(String(activeUserId));
+    //   // let deletedProjectIndex = userData.projects?.findIndex(project => project.id === data.data.toString());
+    //   // userData.projects?.splice(Number(deletedProjectIndex), 1);
 
-    if (data.type === 'syncNeeded') {
-    }
+    // }
+
+    // if (data.type === 'syncNeeded') {
+    //   summary();
+    // }
   });
 
   socket.on('disconnect', (error: any) => {
@@ -63,6 +81,8 @@ function init(context: vscode.ExtensionContext) {
     if (error.response && error.response.status === 403) {
       state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
       state.set(DATABASE_COLUMNS.activeUserId, undefined);
+      signInTreeProvider = new SignInDataTreeProvider();
+      vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
     }
     return Promise.reject(error);
   });
@@ -85,7 +105,7 @@ function init(context: vscode.ExtensionContext) {
 
 function summary() {
   //TODO: Sync first
-  axios.get('https://app.pendulums.io/api/user/summary')
+  axios.get(apiEndPoint + '/user/summary')
     .then(response => {
       let user: User = response.data.user;
       state.set(DATABASE_COLUMNS.activeUserId, user.id);
@@ -100,7 +120,7 @@ function summary() {
 }
 
 function signOut() {
-  axios.get('https://app.pendulums.io/api/auth/signOut')
+  axios.get(apiEndPoint + '/auth/signOut')
     .then(response => {
       state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
       state.set(DATABASE_COLUMNS.activeUserId, undefined);
@@ -132,12 +152,13 @@ async function signIn() {
     notificationService.showError('Password can\'t be empty');
     return;
   }
-  axios.post('https://app.pendulums.io/api/auth/signin', {
+  axios.post(apiEndPoint + '/auth/signin', {
     email: email,
     password: password
   })
     .then(response => {
       notificationService.showInformation('Signed in successfully');
+      console.log(response.headers);
       let sailsSessionId = response.headers['set-cookie'][0].split('sails.sid=')[1];
       state.set(DATABASE_COLUMNS.sailsSessionId, sailsSessionId);
       summary();
@@ -187,8 +208,8 @@ function initCommands(context: vscode.ExtensionContext) {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  initSocket();
   init(context);
+  initSocket();
   initCommands(context);
 }
 
