@@ -7,21 +7,29 @@ import { Project } from './models/project.model';
 import { User } from './models/user.model';
 import { SignInDataTreeProvider } from './views/signIn/signIn-tree-data-provider';
 import { StorageKey } from './services/storage/storage-key';
+import { SecretStorageService } from './services/storage/secret-storage.service';
 
 const apiEndPoint = 'http://localhost:1337';
 
 let state: StateService;
+let secretStorageService: SecretStorageService;
 let notificationService: NotificationService;
 let projectDataTreeProvider: ProjectDataTreeProvider;
 let signInTreeProvider: SignInDataTreeProvider;
 
-function init(context: vscode.ExtensionContext) {
+async function init(context: vscode.ExtensionContext) {
   state = new StateService(context);
+  secretStorageService = new SecretStorageService(context);
   notificationService = new NotificationService();
+
+  const sId = await secretStorageService.get(StorageKey.sailsSessionId);
+  const activeUserId = state.get(StorageKey.activeUserId);
 
   // Add a request interceptor
   axios.interceptors.request.use(function (config) {
-    config.headers.cookie = 'sails.sid=' + state.get(StorageKey.sailsSessionId);
+    if (sId) {
+      config.headers.cookie = 'sails.sid=' + sId;
+    }
     return config;
   }, function (error) {
     // Do something with request error
@@ -35,16 +43,13 @@ function init(context: vscode.ExtensionContext) {
   }, function (error) {
     // Any status codes that falls outside the range of 2xx cause this function to trigger
     if (error.response && error.response.status === 403) {
-      state.set(StorageKey.sailsSessionId, undefined);
+      secretStorageService.delete(StorageKey.sailsSessionId);
       state.set(StorageKey.activeUserId, undefined);
       signInTreeProvider = new SignInDataTreeProvider();
       vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
     }
     return Promise.reject(error);
   });
-
-  let activeUserId = state.get(StorageKey.activeUserId);
-  let sId = state.get(StorageKey.sailsSessionId);
   if (sId && activeUserId) {
     let projects: Project[];
     projects = <Project[]>(<User>state.get(String(activeUserId))).projects;
@@ -53,7 +58,8 @@ function init(context: vscode.ExtensionContext) {
 
     summary();
   } else {
-    state.set(StorageKey.sailsSessionId, undefined);
+    await secretStorageService.delete(StorageKey.sailsSessionId);
+    await state.set(StorageKey.activeUserId, undefined);
     signInTreeProvider = new SignInDataTreeProvider();
     vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
   }
@@ -62,10 +68,10 @@ function init(context: vscode.ExtensionContext) {
 function summary() {
   //TODO: Sync first
   axios.get(apiEndPoint + '/user/summary')
-    .then(response => {
+    .then(async response => {
       let user: User = response.data.user;
-      state.set(StorageKey.activeUserId, user.id);
-      state.set(user.id, user);
+      await state.set(StorageKey.activeUserId, user.id);
+      await state.set(user.id, user);
       projectDataTreeProvider = new ProjectDataTreeProvider(user.projects, user.currentActivity);
       vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
     })
@@ -77,9 +83,9 @@ function summary() {
 
 function signOut() {
   axios.get(apiEndPoint + '/auth/signOut')
-    .then(response => {
-      state.set(StorageKey.sailsSessionId, undefined);
-      state.set(StorageKey.activeUserId, undefined);
+    .then(async response => {
+      await secretStorageService.delete(StorageKey.sailsSessionId);
+      await state.set(StorageKey.activeUserId, undefined);
       notificationService.showInformation('Signed out successfully');
 
       vscode.window.registerTreeDataProvider('pendulums-pendulums', new SignInDataTreeProvider());
@@ -112,11 +118,11 @@ async function signIn() {
     email: email,
     password: password
   })
-    .then(response => {
+    .then(async response => {
       notificationService.showInformation('Signed in successfully');
       console.log(response.headers);
       let sailsSessionId = response.headers['set-cookie'][0].split('sails.sid=')[1];
-      state.set(StorageKey.sailsSessionId, sailsSessionId);
+      await secretStorageService.set(StorageKey.sailsSessionId, sailsSessionId);
       summary();
     })
     .catch(error => {
@@ -144,7 +150,7 @@ function initCommands(context: vscode.ExtensionContext) {
 
   vscode.commands.registerCommand('pendulums.play', async (args) => {
     console.log('play args', args);
-    let activeUserId = state.get(StorageKey.activeUserId);
+    let activeUserId = await state.get(StorageKey.activeUserId);
     let userData = <User>state.get(String(activeUserId));
     if (userData.currentActivity && userData.currentActivity.id) {
       notificationService.showError('Please stop the running activity first');
