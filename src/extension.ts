@@ -1,63 +1,19 @@
 import * as vscode from 'vscode';
-import * as io from 'socket.io-client';
 import axios from 'axios';
-import { StateService } from './services/stateService';
-import { NotificationService } from './services/notificationService';
-import { ProjectDataTreeProvider } from './views/project/projectsTreeDataProvider';
+import { StateService } from './services/storage/state.service';
+import { NotificationService } from './services/notification.service';
+import { ProjectDataTreeProvider } from './views/project/projects-tree-data-provider';
 import { Project } from './models/project.model';
 import { User } from './models/user.model';
-import { SignInDataTreeProvider } from './views/signIn/signInTreeDataProvider';
-import { DATABASE_COLUMNS } from './constants/strings';
+import { SignInDataTreeProvider } from './views/signIn/signIn-tree-data-provider';
+import { StorageKey } from './services/storage/storage-key';
 
 const apiEndPoint = 'http://localhost:1337';
-const socketEndPoint = 'http://localhost:1337';
 
-let socket: any = null;
 let state: StateService;
 let notificationService: NotificationService;
 let projectDataTreeProvider: ProjectDataTreeProvider;
 let signInTreeProvider: SignInDataTreeProvider;
-
-function initSocket() {
-  socket = io(socketEndPoint, { path: '/socket.io', transports: ['websocket'], upgrade: true });
-  socket.on('connect', () => {
-    const sId = state.get(DATABASE_COLUMNS.sailsSessionId);
-    console.log('websocket connected!');
-    if (sId) {
-      socket.emit('get', {
-        method: 'get',
-        url: '/socket/subscribe-to-events',
-        headers: {
-          cookie: 'sails.sid=' + sId
-        }
-      }, () => {
-        // listen to events
-      });
-    }
-  });
-
-  socket.on('message', (data: any) => {
-    console.log('hello');
-    // if (data.type === 'projectRemoved') {
-    //   //TODO: There might be a current activity running on this project
-    //   console.log('delete project', data.data);
-    //   console.log('delete project', data.data.toStrin());
-    //   // let activeUserId = state.get(DATABASE_COLUMNS.activeUserId);
-    //   // let userData = <User>state.get(String(activeUserId));
-    //   // let deletedProjectIndex = userData.projects?.findIndex(project => project.id === data.data.toString());
-    //   // userData.projects?.splice(Number(deletedProjectIndex), 1);
-
-    // }
-
-    // if (data.type === 'syncNeeded') {
-    //   summary();
-    // }
-  });
-
-  socket.on('disconnect', (error: any) => {
-    console.log('websocket disconnected!', error);
-  });
-}
 
 function init(context: vscode.ExtensionContext) {
   state = new StateService(context);
@@ -65,7 +21,7 @@ function init(context: vscode.ExtensionContext) {
 
   // Add a request interceptor
   axios.interceptors.request.use(function (config) {
-    config.headers.cookie = 'sails.sid=' + state.get(DATABASE_COLUMNS.sailsSessionId);
+    config.headers.cookie = 'sails.sid=' + state.get(StorageKey.sailsSessionId);
     return config;
   }, function (error) {
     // Do something with request error
@@ -79,16 +35,16 @@ function init(context: vscode.ExtensionContext) {
   }, function (error) {
     // Any status codes that falls outside the range of 2xx cause this function to trigger
     if (error.response && error.response.status === 403) {
-      state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
-      state.set(DATABASE_COLUMNS.activeUserId, undefined);
+      state.set(StorageKey.sailsSessionId, undefined);
+      state.set(StorageKey.activeUserId, undefined);
       signInTreeProvider = new SignInDataTreeProvider();
       vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
     }
     return Promise.reject(error);
   });
 
-  let activeUserId = state.get(DATABASE_COLUMNS.activeUserId);
-  let sId = state.get(DATABASE_COLUMNS.sailsSessionId);
+  let activeUserId = state.get(StorageKey.activeUserId);
+  let sId = state.get(StorageKey.sailsSessionId);
   if (sId && activeUserId) {
     let projects: Project[];
     projects = <Project[]>(<User>state.get(String(activeUserId))).projects;
@@ -97,7 +53,7 @@ function init(context: vscode.ExtensionContext) {
 
     summary();
   } else {
-    state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
+    state.set(StorageKey.sailsSessionId, undefined);
     signInTreeProvider = new SignInDataTreeProvider();
     vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
   }
@@ -108,7 +64,7 @@ function summary() {
   axios.get(apiEndPoint + '/user/summary')
     .then(response => {
       let user: User = response.data.user;
-      state.set(DATABASE_COLUMNS.activeUserId, user.id);
+      state.set(StorageKey.activeUserId, user.id);
       state.set(user.id, user);
       projectDataTreeProvider = new ProjectDataTreeProvider(user.projects, user.currentActivity);
       vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
@@ -122,8 +78,8 @@ function summary() {
 function signOut() {
   axios.get(apiEndPoint + '/auth/signOut')
     .then(response => {
-      state.set(DATABASE_COLUMNS.sailsSessionId, undefined);
-      state.set(DATABASE_COLUMNS.activeUserId, undefined);
+      state.set(StorageKey.sailsSessionId, undefined);
+      state.set(StorageKey.activeUserId, undefined);
       notificationService.showInformation('Signed out successfully');
 
       vscode.window.registerTreeDataProvider('pendulums-pendulums', new SignInDataTreeProvider());
@@ -160,7 +116,7 @@ async function signIn() {
       notificationService.showInformation('Signed in successfully');
       console.log(response.headers);
       let sailsSessionId = response.headers['set-cookie'][0].split('sails.sid=')[1];
-      state.set(DATABASE_COLUMNS.sailsSessionId, sailsSessionId);
+      state.set(StorageKey.sailsSessionId, sailsSessionId);
       summary();
     })
     .catch(error => {
@@ -188,7 +144,7 @@ function initCommands(context: vscode.ExtensionContext) {
 
   vscode.commands.registerCommand('pendulums.play', async (args) => {
     console.log('play args', args);
-    let activeUserId = state.get(DATABASE_COLUMNS.activeUserId);
+    let activeUserId = state.get(StorageKey.activeUserId);
     let userData = <User>state.get(String(activeUserId));
     if (userData.currentActivity && userData.currentActivity.id) {
       notificationService.showError('Please stop the running activity first');
@@ -209,7 +165,6 @@ function initCommands(context: vscode.ExtensionContext) {
 
 export async function activate(context: vscode.ExtensionContext) {
   init(context);
-  initSocket();
   initCommands(context);
 }
 

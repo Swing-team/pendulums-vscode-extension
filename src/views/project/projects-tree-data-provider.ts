@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ProjectTreeItem } from './projectTreeItem';
+import { ProjectTreeItem } from './project-tree-item';
 import { Project } from '../../models/project.model';
 import { Activity } from '../../models/activity.model';
 
