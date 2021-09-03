@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import axios from 'axios';
 import { StateService } from './services/storage/state.service';
 import { NotificationService } from './services/notification.service';
 import { ProjectDataTreeProvider } from './views/project/projects-tree-data-provider';
@@ -8,12 +7,12 @@ import { User } from './models/user.model';
 import { SignInDataTreeProvider } from './views/signIn/signIn-tree-data-provider';
 import { StorageKey } from './services/storage/storage-key';
 import { SecretStorageService } from './services/storage/secret-storage.service';
-
-const apiEndPoint = 'http://localhost:1337';
+import { ApiService } from './services/api/api.service';
 
 let state: StateService;
 let secretStorageService: SecretStorageService;
 let notificationService: NotificationService;
+let apiService: ApiService;
 let projectDataTreeProvider: ProjectDataTreeProvider;
 let signInTreeProvider: SignInDataTreeProvider;
 
@@ -21,79 +20,24 @@ async function init(context: vscode.ExtensionContext) {
   state = new StateService(context);
   secretStorageService = new SecretStorageService(context);
   notificationService = new NotificationService();
+  apiService = new ApiService(secretStorageService, state, notificationService);
 
   const sId = await secretStorageService.get(StorageKey.sailsSessionId);
   const activeUserId = state.get(StorageKey.activeUserId);
 
-  // Add a request interceptor
-  axios.interceptors.request.use(function (config) {
-    if (sId) {
-      config.headers.cookie = 'sails.sid=' + sId;
-    }
-    return config;
-  }, function (error) {
-    // Do something with request error
-    return Promise.reject(error);
-  });
-
-  // Add a response interceptor
-  axios.interceptors.response.use(function (response) {
-    // Any status code that lie within the range of 2xx cause this function to trigger
-    return response;
-  }, function (error) {
-    // Any status codes that falls outside the range of 2xx cause this function to trigger
-    if (error.response && error.response.status === 403) {
-      secretStorageService.delete(StorageKey.sailsSessionId);
-      state.set(StorageKey.activeUserId, undefined);
-      signInTreeProvider = new SignInDataTreeProvider();
-      vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
-    }
-    return Promise.reject(error);
-  });
   if (sId && activeUserId) {
     let projects: Project[];
     projects = <Project[]>(<User>state.get(String(activeUserId))).projects;
     projectDataTreeProvider = new ProjectDataTreeProvider(projects);
     vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
 
-    summary();
+    apiService.summary();
   } else {
     await secretStorageService.delete(StorageKey.sailsSessionId);
     await state.set(StorageKey.activeUserId, undefined);
     signInTreeProvider = new SignInDataTreeProvider();
     vscode.window.registerTreeDataProvider('pendulums-pendulums', signInTreeProvider);
   }
-}
-
-function summary() {
-  //TODO: Sync first
-  axios.get(apiEndPoint + '/user/summary')
-    .then(async response => {
-      let user: User = response.data.user;
-      await state.set(StorageKey.activeUserId, user.id);
-      await state.set(user.id, user);
-      projectDataTreeProvider = new ProjectDataTreeProvider(user.projects, user.currentActivity);
-      vscode.window.registerTreeDataProvider('pendulums-pendulums', projectDataTreeProvider);
-    })
-    .catch(error => {
-      console.log('error', error);
-      notificationService.showError(`Summary failed ${error}`);
-    });
-}
-
-function signOut() {
-  axios.get(apiEndPoint + '/auth/signOut')
-    .then(async response => {
-      await secretStorageService.delete(StorageKey.sailsSessionId);
-      await state.set(StorageKey.activeUserId, undefined);
-      notificationService.showInformation('Signed out successfully');
-
-      vscode.window.registerTreeDataProvider('pendulums-pendulums', new SignInDataTreeProvider());
-    })
-    .catch(error => {
-      console.log('error', error);
-      notificationService.showError(`Sign out failed ${error}`);
-    });
 }
 
 async function signIn() {
@@ -114,26 +58,12 @@ async function signIn() {
     notificationService.showError('Password can\'t be empty');
     return;
   }
-  axios.post(apiEndPoint + '/auth/signin', {
-    email: email,
-    password: password
-  })
-    .then(async response => {
-      notificationService.showInformation('Signed in successfully');
-      console.log(response.headers);
-      let sailsSessionId = response.headers['set-cookie'][0].split('sails.sid=')[1];
-      await secretStorageService.set(StorageKey.sailsSessionId, sailsSessionId);
-      summary();
-    })
-    .catch(error => {
-      console.log('error', error);
-      notificationService.showError(`Sign in failed ${error}`);
-    });
+  apiService.signIn(email, password);
 }
 
 function initCommands(context: vscode.ExtensionContext) {
   let syncCommand = vscode.commands.registerCommand('pendulums.sync', () => {
-    summary();
+    apiService.summary();
   });
 
   let signInCommand = vscode.commands.registerCommand('pendulums.signIn', () => {
@@ -141,11 +71,11 @@ function initCommands(context: vscode.ExtensionContext) {
   });
 
   let signOutCommand = vscode.commands.registerCommand('pendulums.signOut', () => {
-    signOut();
+    apiService.signOut();
   });
 
   let getProjectsCommand = vscode.commands.registerCommand('pendulums.getProjects', () => {
-    summary();
+    apiService.summary();
   });
 
   vscode.commands.registerCommand('pendulums.play', async (args) => {
